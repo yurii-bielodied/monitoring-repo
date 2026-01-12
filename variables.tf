@@ -21,27 +21,10 @@ variable "GITHUB_SSH_KEY_TITLE" {
   default     = "flux-gitops-deploy-key"
 }
 
-variable "github_repository" {
+variable "config_path" {
   type        = string
-  description = "GitHub repository in format owner/repo"
-}
-
-variable "github_token" {
-  type        = string
-  description = "GitHub personal access token"
-  sensitive   = true
-}
-
-variable "private_key" {
-  type        = string
-  description = "SSH private key for Git authentication"
-  sensitive   = true
-}
-
-variable "target_path" {
-  type        = string
-  description = "Path in repository for Flux manifests"
-  default     = "flux-repo/cluster"
+  default     = "~/.kube/config"
+  description = "The path to the kubeconfig file"
 }
 
 variable "TELE_TOKEN" {

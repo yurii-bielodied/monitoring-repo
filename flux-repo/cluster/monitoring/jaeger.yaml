@@ -1,0 +1,47 @@
+# Jaeger for distributed tracing
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: jaeger
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: jaeger
+      version: "0.x.x"
+      sourceRef:
+        kind: HelmRepository
+        name: jaegertracing
+        namespace: flux-system
+  values:
+    provisionDataStore:
+      cassandra: false
+
+    # Use all-in-one for simplicity
+    allInOne:
+      enabled: true
+      resources:
+        requests:
+          cpu: 25m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      extraEnv:
+      - name: COLLECTOR_OTLP_ENABLED
+        value: "true"
+      # Subpath configuration for routing
+      - name: QUERY_BASE_PATH
+        value: "/jaeger"
+
+    storage:
+      type: memory
+
+    # Disable separate components
+    agent:
+      enabled: false
+    collector:
+      enabled: false
+    query:
+      enabled: false

@@ -1,0 +1,167 @@
+# Prometheus + Grafana stack
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "80.x.x"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    createNamespace: true
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Prometheus configuration
+    prometheus:
+      prometheusSpec:
+        retention: 24h
+        storageSpec: {} # Ephemeral storage for demo
+        # Subpath configuration for routing
+        routePrefix: /prometheus
+        externalUrl: "/prometheus"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        # Monitor all ServiceMonitors across namespaces
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        serviceMonitorNamespaceSelector: {}
+        serviceMonitorSelector: {}
+        podMonitorNamespaceSelector: {}
+        podMonitorSelector: {}
+
+    # Grafana configuration
+    grafana:
+      enabled: true
+      adminPassword: "SuperKuber8"
+      # Disable default dashboards
+      defaultDashboardsEnabled: false
+      # Subpath configuration
+      grafana.ini:
+        server:
+          root_url: "/grafana/"
+          serve_from_sub_path: true
+      sidecar:
+        dashboards:
+          enabled: true
+        datasources:
+          defaultDatasourceEnabled: false
+      service:
+        type: ClusterIP
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+      # Data sources
+      datasources:
+        datasources.yaml:
+          apiVersion: 1
+          datasources:
+          - name: Prometheus
+            uid: prometheus
+            type: prometheus
+            url: http://kube-prometheus-stack-prometheus.monitoring:9090/prometheus
+            isDefault: true
+            jsonData:
+              timeInterval: 30s
+          - name: Loki
+            uid: loki
+            type: loki
+            url: http://loki.monitoring:3100
+            jsonData:
+              maxLines: 1000
+          - name: Jaeger
+            uid: jaeger
+            type: jaeger
+            url: http://jaeger-query.monitoring:16686
+            jsonData:
+              tracesToLogs:
+                datasourceUid: loki
+
+      # Dashboard providers
+      dashboardProviders:
+        dashboardproviders.yaml:
+          apiVersion: 1
+          providers:
+          - name: 'default'
+            orgId: 1
+            folder: ''
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+      # Import community dashboards
+      dashboards:
+        default:
+          # Kubernetes dashboards
+          kubernetes-cluster:
+            gnetId: 15757
+            revision: 43
+            datasource: Prometheus
+          kubernetes-nodes:
+            gnetId: 15759
+            revision: 40
+            datasource: Prometheus
+          kubernetes-pods:
+            gnetId: 16520
+            revision: 3
+            datasource: Prometheus
+          # Node Exporter
+          node-exporter:
+            gnetId: 1860
+            revision: 42
+            datasource: Prometheus
+          # Loki
+          loki-logs:
+            gnetId: 16976
+            revision: 3
+            datasource:
+            - name: DS_PROMETHEUS
+              value: Prometheus
+            - name: DS_LOKI
+              value: Loki
+          # OpenTelemetry Collector
+          otel-collector:
+            gnetId: 15983
+            revision: 29
+            datasource: Prometheus
+
+    # Disable components not needed for demo
+    alertmanager:
+      enabled: false
+    # coreDns:
+    #   enabled: false
+    # kubeEtcd:
+    #   enabled: false
+
+    # Enable metrics collectors
+    kubeStateMetrics:
+      enabled: true
+    nodeExporter:
+      enabled: true
+
+    # Prometheus Operator
+    prometheusOperator:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi

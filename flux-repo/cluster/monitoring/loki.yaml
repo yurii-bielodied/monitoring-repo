@@ -1,0 +1,47 @@
+# Loki for log aggregation
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: loki
+      version: "5.x.x"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  values:
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      storage:
+        type: filesystem
+
+    # Use single binary mode for simplicity
+    singleBinary:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 25m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+    # Disable distributed components
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    backend:
+      replicas: 0
+
+    # Disable default dashboards
+    monitoring:
+      dashboards:
+        enabled: false

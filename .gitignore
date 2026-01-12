@@ -1,0 +1,26 @@
+# Terraform files
+.terraform
+.terraform.*
+
+# State files
+*.tfstate
+*.tfstate.*
+
+# Log files
+*.log
+*.log*
+
+# Vars files
+*.tfvars
+*.tfvars.json
+
+# Kind cluster files
+kind-cluster-config
+
+# GKE cluster kubeconfig
+kubeconfig
+
+# Backup files
+*.backup
+*.bak
+*.old

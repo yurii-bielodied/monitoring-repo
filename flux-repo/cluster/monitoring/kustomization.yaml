@@ -8,4 +8,3 @@ resources:
 - fluent-bit.yaml
 - jaeger.yaml
 - otel-operator.yaml
-- otel-collector.yaml

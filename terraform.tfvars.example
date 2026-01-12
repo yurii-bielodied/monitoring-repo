@@ -1,0 +1,6 @@
+GITHUB_OWNER         = ""
+GITHUB_TOKEN         = ""
+FLUX_GITHUB_REPO     = "monitoring-repo"
+GITHUB_SSH_KEY_TITLE = "flux-ssh"
+
+TELE_TOKEN = ""

@@ -46,7 +46,7 @@ spec:
     # Grafana configuration
     grafana:
       enabled: true
-      adminPassword: "SuperKuber8"
+      # adminPassword: "SuperKuber8"
       # Disable default dashboards
       defaultDashboardsEnabled: false
       # Subpath configuration

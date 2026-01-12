@@ -1,16 +1,17 @@
-# Monitoring Stack для Kubernetes (Senior Level)
+# Monitoring Stack для Kubernetes (Principal Level)
 
-Моніторинговий стек розгорнутий у dev-середовищі Kubernetes за допомогою GitOps (Flux CD) з OpenTelemetry Operator.
+Моніторинговий стек розгорнутий у dev-середовищі Kubernetes за допомогою GitOps (Flux CD) з OpenTelemetry Operator та наскрізним TraceID.
 
-## 🎯 Рівень виконання: 10 балів (Senior)
+## 🎯 Рівень виконання: 20 балів (Principal)
 
-| Критерій                       | Статус                                   |
-| ------------------------------ | ---------------------------------------- |
-| Kubernetes dev-середовище      | ✅ Kind кластер                          |
-| Flux GitOps                    | ✅ Повна автоматизація                   |
-| **OTEL розгорнуто оператором** | ✅ `OpenTelemetryCollector` CRD          |
-| Fluent-Bit збирає логи         | ✅ Всі ноди та контейнери                |
-| Проект інструментовано         | ✅ ServiceMonitor + Auto-instrumentation |
+| Критерій                   | Статус                                        |
+| -------------------------- | --------------------------------------------- |
+| Kubernetes dev-середовище  | ✅ Kind кластер                               |
+| Flux GitOps                | ✅ Повна автоматизація                        |
+| OTEL розгорнуто оператором | ✅ `OpenTelemetryCollector` CRD               |
+| Fluent-Bit збирає логи     | ✅ Всі ноди та контейнери                     |
+| Проект інструментовано     | ✅ Prometheus metrics                         |
+| **Наскрізний TraceID**     | ✅ **OpenTelemetry SDK + кореляція з логами** |
 
 ---
 
@@ -29,41 +30,87 @@
 
 ---
 
-## 🏗️ Архітектура
+## 🏗️ Архітектура з наскрізним TraceID
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Kind Kubernetes Cluster                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────┐     │
-│  │                    OpenTelemetry Operator                       │     │
-│  │  Manages OpenTelemetryCollector CRD + Auto-Instrumentation     │     │
-│  └────────────────────────────────────────────────────────────────┘     │
-│                              │                                           │
-│                              ▼                                           │
-│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────┐          │
-│  │   kbot app   │───▶│ OpenTelemetry    │───▶│   Jaeger     │          │
-│  │   (demo ns)  │    │ Collector (CRD)  │    │  (traces)    │          │
-│  │              │    │                  │    └──────────────┘          │
-│  │ [Instrumented]    │  receivers:      │                               │
-│  │ - /metrics   │    │  - otlp          │    ┌──────────────┐          │
-│  │ - traces     │    │  - prometheus    │───▶│  Prometheus  │          │
-│  └──────────────┘    │                  │    │  (metrics)   │          │
-│         │            │  exporters:      │    └──────────────┘          │
-│         │            │  - jaeger        │           │                   │
-│         ▼            │  - prometheus    │           │                   │
-│  ┌──────────────┐    │  - loki          │           ▼                   │
-│  │  Fluent-Bit  │───▶└──────────────────┘    ┌──────────────┐          │
-│  │   (logs)     │            │               │   Grafana    │          │
-│  └──────────────┘            │               │ (dashboards) │          │
-│         │                    ▼               └──────────────┘          │
-│         │            ┌──────────────┐              ▲                    │
-│         └───────────▶│    Loki      │──────────────┘                    │
-│                      │(log storage) │                                   │
-│                      └──────────────┘                                   │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Kind Kubernetes Cluster                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐     │
+│  │                    OpenTelemetry Operator                           │     │
+│  │  Manages OpenTelemetryCollector CRD + Auto-Instrumentation          │     │
+│  └────────────────────────────────────────────────────────────────────┘     │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                         kbot (demo ns)                               │    │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
+│  │  │  OpenTelemetry SDK                                          │    │    │
+│  │  │  - Traces з TraceID                                         │    │    │
+│  │  │  - Spans для кожної операції                                │    │    │
+│  │  │  - TraceID в логах: [TraceID: abc123...]                   │    │    │
+│  │  └─────────────────────────────────────────────────────────────┘    │    │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
+│  │  │  Prometheus Client                                          │    │    │
+│  │  │  - /metrics endpoint                                        │    │    │
+│  │  │  - kbot_messages_total                                      │    │    │
+│  │  │  - kbot_message_processing_duration_seconds                 │    │    │
+│  │  └─────────────────────────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│         │                    │                      │                        │
+│         │ OTLP (traces)      │ /metrics             │ stdout logs            │
+│         ▼                    ▼                      ▼                        │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
+│  │    OTEL      │    │  Prometheus  │    │  Fluent-Bit  │                   │
+│  │  Collector   │    │              │    │              │                   │
+│  └──────────────┘    └──────────────┘    └──────────────┘                   │
+│         │                    │                      │                        │
+│         ▼                    │                      ▼                        │
+│  ┌──────────────┐            │            ┌──────────────┐                   │
+│  │   Jaeger     │            │            │    Loki      │                   │
+│  │  (traces)    │            │            │   (logs)     │                   │
+│  └──────────────┘            │            └──────────────┘                   │
+│         │                    │                      │                        │
+│         └────────────────────┼──────────────────────┘                        │
+│                              ▼                                               │
+│                      ┌──────────────┐                                        │
+│                      │   Grafana    │                                        │
+│                      │              │                                        │
+│                      │ Traces ←→ Logs correlation                           │
+│                      │ via TraceID                                          │
+│                      └──────────────┘                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 🔗 Наскрізний TraceID (Principal Level)
+
+### Як це працює
+
+1. **kbot** створює span при отриманні повідомлення
+2. **TraceID** генерується автоматично OpenTelemetry SDK
+3. **TraceID** додається до логів: `[TraceID: abc123...] Received message...`
+4. **Traces** експортуються до OTEL Collector → Jaeger
+5. **Logs** збираються Fluent-Bit → Loki
+6. **Grafana** корелює traces та logs за TraceID
+
+### Приклад логів з TraceID
+
+```
+[TraceID: 4bf92f3577b34da6a3ce929d0e0e4736] Received message from user123: /kbot hello
+[TraceID: 4bf92f3577b34da6a3ce929d0e0e4736] Processed hello command in 5ms (status: success)
+```
+
+### Кореляція в Grafana
+
+В Loki можна знайти всі логи за TraceID:
+
+```logql
+{namespace="demo"} |= "4bf92f3577b34da6a3ce929d0e0e4736"
+```
+
+В Jaeger можна знайти trace та побачити всі spans.
 
 ---
 
@@ -113,201 +160,85 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 8080:80
 
 ### Налаштовані Data Sources
 
-| Джерело    | URL                                                                  |
-| ---------- | -------------------------------------------------------------------- |
-| Prometheus | `http://kube-prometheus-stack-prometheus.monitoring:9090/prometheus` |
-| Loki       | `http://loki.monitoring:3100`                                        |
-| Jaeger     | `http://jaeger-query.monitoring:16686`                               |
+| Джерело    | URL                                                                  | Призначення |
+| ---------- | -------------------------------------------------------------------- | ----------- |
+| Prometheus | `http://kube-prometheus-stack-prometheus.monitoring:9090/prometheus` | Метрики     |
+| Loki       | `http://loki.monitoring:3100`                                        | Логи        |
+| Jaeger     | `http://jaeger-query.monitoring:16686`                               | Traces      |
 
 ---
 
 ## 📸 Демо: Grafana Loki Dashboard
 
-![Grafana Loki Dashboard](image.png)
+![Grafana Loki Dashboard](img/loki.png)
 
 На скріншоті показано:
 
 - Фільтрація логів за namespace `demo` та контейнером `kbot`
 - Histogram логів з часовою шкалою
-- Графіки CPU та Memory Usage
 - Детальний перегляд логів у JSON форматі
 
+## Grafana Dashboards
+
+![Grafana Dashboards](img/dashboards.png)
+
+Також доступні інші дашборди
+
+![Grafana Load Dashboard](img/load.png)
+
+На скріншоті показано:
+
+- Графіки CPU та Memory Usage
+- CPU Requests & Limits
+- Cluster Utilization
+
 ---
 
-## ⭐ OpenTelemetry Operator (Senior Level)
+## 📈 Інструментація kbot
 
-### Чому Operator, а не Helm Chart?
+### Prometheus Metrics
 
-| Helm Chart                   | Operator                                |
-| ---------------------------- | --------------------------------------- |
-| Статичне розгортання         | Декларативне управління через CRD       |
-| Ручне оновлення конфігурації | Автоматична реконсіляція                |
-| Немає auto-instrumentation   | Підтримка `Instrumentation` CRD         |
-| Один collector               | Можливість керувати багатьма collectors |
+kbot експортує наступні метрики на `/metrics`:
 
-### OpenTelemetryCollector CRD
+| Метрика                                    | Тип       | Опис                  |
+| ------------------------------------------ | --------- | --------------------- |
+| `kbot_messages_total`                      | Counter   | Кількість повідомлень |
+| `kbot_message_processing_duration_seconds` | Histogram | Час обробки           |
+| `kbot_info`                                | Gauge     | Версія бота           |
+| `kbot_start_time_seconds`                  | Gauge     | Час запуску           |
 
-```yaml
-apiVersion: opentelemetry.io/v1beta1
-kind: OpenTelemetryCollector
-metadata:
-  name: otel-collector
-  namespace: monitoring
-spec:
-  mode: deployment
-  replicas: 1
-  config:
-    receivers:
-      otlp:
-        protocols:
-          grpc:
-            endpoint: 0.0.0.0:4317
-          http:
-            endpoint: 0.0.0.0:4318
-      prometheus:
-        config:
-          scrape_configs:
-            - job_name: "kbot-metrics"
-              kubernetes_sd_configs:
-                - role: pod
-                  namespaces:
-                    names: [demo]
+### OpenTelemetry Tracing
 
-    processors:
-      k8sattributes:
-        extract:
-          metadata: [k8s.namespace.name, k8s.pod.name]
+kbot створює spans для кожної операції:
 
-    exporters:
-      otlp/jaeger:
-        endpoint: jaeger-collector.monitoring:4317
-      prometheus:
-        endpoint: 0.0.0.0:8889
-      otlphttp/loki:
-        endpoint: http://loki.monitoring:3100/otlp
-
-    service:
-      pipelines:
-        traces:
-          receivers: [otlp]
-          exporters: [otlp/jaeger]
-        metrics:
-          receivers: [otlp, prometheus]
-          exporters: [prometheus]
-        logs:
-          receivers: [otlp]
-          exporters: [otlphttp/loki]
+```
+handle_message (root span)
+├── command_hello
+├── command_time
+└── command_default
 ```
 
----
-
-## 📈 Інструментація проекту kbot
-
-### Варіант 1: Prometheus Metrics Endpoint (Рекомендовано)
-
-Додайте до коду kbot (Go):
+### Приклад коду інструментації
 
 ```go
-package main
+kbot.Handle(telebot.OnText, func(m telebot.Context) error {
+    // Створюємо span з TraceID
+    ctx, span := StartSpan(ctx, "handle_message")
+    defer span.End()
 
-import (
-    "net/http"
+    // Отримуємо TraceID для логування
+    traceID := GetTraceID(ctx)
 
-    "github.com/prometheus/client_golang/prometheus"
-    "github.com/prometheus/client_golang/prometheus/promauto"
-    "github.com/prometheus/client_golang/prometheus/promhttp"
-)
+    // Логуємо з TraceID для кореляції
+    log.Printf("[TraceID: %s] Received message: %s", traceID, m.Text())
 
-var (
-    // Лічильник оброблених повідомлень
-    messagesProcessed = promauto.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "kbot_messages_processed_total",
-            Help: "Total number of messages processed",
-        },
-        []string{"command", "status"},
-    )
+    // ... обробка ...
 
-    // Гістограма часу обробки
-    messageLatency = promauto.NewHistogramVec(
-        prometheus.HistogramOpts{
-            Name:    "kbot_message_duration_seconds",
-            Help:    "Message processing duration",
-            Buckets: prometheus.DefBuckets,
-        },
-        []string{"command"},
-    )
+    // Записуємо метрики
+    RecordMessage(command, status, duration)
 
-    // Gauge активних з'єднань
-    activeConnections = promauto.NewGauge(
-        prometheus.GaugeOpts{
-            Name: "kbot_active_connections",
-            Help: "Number of active connections",
-        },
-    )
-)
-
-func main() {
-    // Запуск metrics сервера
-    go func() {
-        http.Handle("/metrics", promhttp.Handler())
-        http.ListenAndServe(":8080", nil)
-    }()
-
-    // ... решта коду kbot
-}
-
-// Приклад використання в обробнику повідомлень
-func handleMessage(command string) {
-    timer := prometheus.NewTimer(messageLatency.WithLabelValues(command))
-    defer timer.ObserveDuration()
-
-    // ... обробка
-
-    messagesProcessed.WithLabelValues(command, "success").Inc()
-}
-```
-
-### Варіант 2: OpenTelemetry Auto-Instrumentation
-
-Додайте анотацію до Deployment kbot:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kbot
-  namespace: demo
-spec:
-  template:
-    metadata:
-      annotations:
-        # Активує auto-instrumentation
-        instrumentation.opentelemetry.io/inject-go: "true"
-        # Prometheus scraping
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
-```
-
-### ServiceMonitor для kbot
-
-Вже створено у `flux-repo/cluster/demo/kbot-monitoring.yaml`:
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: kbot
-  namespace: demo
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: kbot
-  endpoints:
-    - port: metrics
-      interval: 30s
-      path: /metrics
+    return nil
+})
 ```
 
 ---
@@ -324,77 +255,108 @@ monitoring-repo/
 │   └── fluxcd-flux-bootstrap/
 └── flux-repo/
     └── cluster/
+        ├── kustomization.yaml
+        ├── namespaces.yaml             # Flux Kustomization
+        ├── monitoring.yaml             # Flux Kustomization
+        ├── otel-collector.yaml         # Flux Kustomization (dependsOn: monitoring)
+        ├── demo.yaml                   # Flux Kustomization
+        │
         ├── namespaces/
-        │   └── namespaces.yaml        # monitoring, cert-manager
+        │   └── namespaces.yaml         # monitoring, cert-manager
+        │
         ├── monitoring/
-        │   ├── helm-repos.yaml        # prometheus, grafana, otel, jetstack
-        │   ├── cert-manager.yaml      # TLS для webhooks
+        │   ├── helm-repos.yaml
+        │   ├── cert-manager.yaml
         │   ├── kube-prometheus-stack.yaml
         │   ├── loki.yaml
         │   ├── fluent-bit.yaml
         │   ├── jaeger.yaml
-        │   ├── otel-operator.yaml     # ⭐ OTEL Operator
-        │   └── otel-collector.yaml    # ⭐ OpenTelemetryCollector CRD
+        │   └── otel-operator.yaml      # ⭐ OTEL Operator
+        │
+        ├── otel-collector/
+        │   └── otel-collector.yaml     # ⭐ OpenTelemetryCollector CRD
+        │
         └── demo/
             ├── kbot-gr.yaml
             ├── kbot-hr.yaml
-            └── kbot-monitoring.yaml   # ServiceMonitor + Instrumentation
+            └── kbot-monitoring.yaml    # ServiceMonitor
 ```
 
----
+### Порядок розгортання (Flux Dependencies)
 
-## 🔧 Конфігурація Fluent-Bit
-
-Збирає логи з **усіх контейнерів та нод** кластеру:
-
-```yaml
-inputs: |
-  [INPUT]
-      Name tail
-      Path /var/log/containers/*.log    # Всі контейнери
-      multiline.parser docker, cri
-      Tag kube.*
-      Mem_Buf_Limit 5MB
-      Skip_Long_Lines On
-
-filters: |
-  [FILTER]
-      Name kubernetes
-      Match kube.*
-      Merge_Log On
-      K8S-Logging.Parser On
-
-outputs: |
-  [OUTPUT]
-      Name loki
-      Match kube.*
-      Host loki.monitoring.svc.cluster.local
-      Port 3100
-      Labels job=fluentbit,namespace=$kubernetes['namespace_name'],
-             pod=$kubernetes['pod_name'],container=$kubernetes['container_name']
+```
+namespaces → monitoring (operator) → otel-collector (CR)
+                                   → demo (kbot)
 ```
 
 ---
 
 ## 🔍 Корисні команди
 
+### Перевірка компонентів
+
 ```bash
-# Статус Flux
+# Flux status
 flux get all -A
 
-# Статус OTEL Operator
+# OTEL Collector
 kubectl get opentelemetrycollectors -n monitoring
-
-# Логи OTEL Collector
 kubectl logs -n monitoring -l app.kubernetes.io/name=otel-collector-collector
 
-# Перевірка Instrumentation
-kubectl get instrumentation -n demo
+# kbot metrics
+kubectl port-forward -n demo deploy/kbot 8080:8080
+curl http://localhost:8080/metrics | grep kbot_
 
-# Port-forward сервіси
+# kbot logs з TraceID
+kubectl logs -n demo deploy/kbot -f | grep TraceID
+```
+
+### Port-forward сервіси
+
+```bash
+# Grafana
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 8080:80
+
+# Jaeger UI
 kubectl port-forward -n monitoring svc/jaeger-query 16686:16686
+
+# Prometheus
 kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090
+```
+
+---
+
+## 📊 Grafana Queries
+
+### Prometheus (kbot metrics)
+
+```promql
+# Messages per second
+rate(kbot_messages_total[1m])
+
+# Error rate
+sum(rate(kbot_messages_total{status="error"}[5m]))
+/ sum(rate(kbot_messages_total[5m])) * 100
+
+# P99 latency
+histogram_quantile(0.99,
+  rate(kbot_message_processing_duration_seconds_bucket[5m]))
+
+# Uptime
+time() - kbot_start_time_seconds
+```
+
+### Loki (logs with TraceID)
+
+```logql
+# All kbot logs
+{namespace="demo", container="kbot"}
+
+# Logs with specific TraceID
+{namespace="demo"} |= "TraceID: 4bf92f3577b34da6a3ce929d0e0e4736"
+
+# Error logs
+{namespace="demo", container="kbot"} |= "error"
 ```
 
 ---
@@ -409,8 +371,8 @@ terraform destroy
 
 ## 📚 Посилання
 
+- [OpenTelemetry Go SDK](https://opentelemetry.io/docs/languages/go/)
 - [OpenTelemetry Operator](https://opentelemetry.io/docs/kubernetes/operator/)
-- [OpenTelemetryCollector CRD](https://github.com/open-telemetry/opentelemetry-operator/blob/main/docs/api.md)
-- [Go Instrumentation](https://opentelemetry.io/docs/languages/go/)
 - [Prometheus Client Go](https://github.com/prometheus/client_golang)
 - [Flux CD](https://fluxcd.io/docs/)
+- [Grafana Loki](https://grafana.com/docs/loki/latest/)

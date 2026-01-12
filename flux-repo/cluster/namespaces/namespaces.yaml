@@ -11,3 +11,8 @@ metadata:
   name: cert-manager
   labels:
     name: cert-manager
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo

@@ -48,7 +48,6 @@ module "flux_bootstrap" {
 
 provider "kubernetes" {
   config_path = "${path.root}/kind-cluster-config"
-  # config_path = pathexpand("~/.kube/config") # WSL
 }
 
 resource "kubernetes_secret_v1" "kbot" {

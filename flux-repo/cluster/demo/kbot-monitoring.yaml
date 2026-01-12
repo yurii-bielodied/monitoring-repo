@@ -1,0 +1,77 @@
+# ServiceMonitor for kbot metrics
+# Requires kbot to expose /metrics endpoint on port 8080
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kbot
+  namespace: demo
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kbot
+  namespaceSelector:
+    matchNames:
+    - demo
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+---
+# PodMonitor as alternative if no Service exists
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kbot
+  namespace: demo
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kbot
+  namespaceSelector:
+    matchNames:
+    - demo
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+---
+# OTEL Auto-Instrumentation for Go applications
+# This injects OTEL SDK into Go applications automatically
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: kbot-instrumentation
+  namespace: demo
+spec:
+  exporter:
+    endpoint: http://otel-collector-collector.monitoring.svc.cluster.local:4317
+  
+  propagators:
+    - tracecontext
+    - baggage
+  
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1"
+  
+  # Go specific configuration
+  go:
+    image: ghcr.io/open-telemetry/opentelemetry-go-instrumentation/autoinstrumentation-go:latest
+    env:
+    - name: OTEL_GO_AUTO_TARGET_EXE
+      value: /app/kbot
+    - name: OTEL_SERVICE_NAME
+      value: kbot
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: http://otel-collector-collector.monitoring.svc.cluster.local:4317
+    resourceRequirements:
+      limits:
+        cpu: 500m
+        memory: 64Mi
+      requests:
+        cpu: 50m
+        memory: 32Mi

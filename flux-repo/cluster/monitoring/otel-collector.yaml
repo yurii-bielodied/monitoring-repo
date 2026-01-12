@@ -1,302 +1,204 @@
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
+# OpenTelemetry Collector - deployed via Operator CRD
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
 metadata:
   name: otel-collector
   namespace: monitoring
 spec:
-  dependsOn:
-  - name: kube-prometheus-stack
-    namespace: monitoring
+  mode: deployment
+  replicas: 1
 
-  interval: 30m
-  chart:
-    spec:
-      chart: opentelemetry-collector
-      version: "0.x.x"
-      sourceRef:
-        kind: HelmRepository
-        name: open-telemetry
-        namespace: flux-system
+  image: otel/opentelemetry-collector-contrib:latest
 
-  values:
-    mode: deployment
-    replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
-    image:
-      repository: otel/opentelemetry-collector-contrib
+  # Expose ports for OTLP receivers
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    protocol: TCP
+  - name: prom-export
+    port: 8889
+    protocol: TCP
 
-    presets:
-      kubernetesAttributes:
-        enabled: true
+  config:
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      # Prometheus receiver to scrape metrics from instrumented apps
+      prometheus:
+        config:
+          scrape_configs:
+          - job_name: 'kbot-metrics'
+            scrape_interval: 15s
+            kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names:
+                - demo
+            relabel_configs:
+            - source_labels: [ __meta_kubernetes_pod_annotation_prometheus_io_scrape ]
+              action: keep
+              regex: "true"
+            - source_labels: [ __meta_kubernetes_pod_annotation_prometheus_io_port ]
+              action: replace
+              target_label: __address__
+              regex: (.+)
+              replacement: ${1}:$$1
+            - source_labels: [ __meta_kubernetes_pod_name ]
+              target_label: pod
+            - source_labels: [ __meta_kubernetes_namespace ]
+              target_label: namespace
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+
+      # Add k8s attributes to telemetry
+      k8sattributes:
+        extract:
+          metadata:
+          - k8s.namespace.name
+          - k8s.pod.name
+          - k8s.pod.uid
+          - k8s.deployment.name
+          labels:
+          - tag_name: app
+            key: app
+            from: pod
+        pod_association:
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+        - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+
+    exporters:
+      debug:
+        verbosity: detailed
+
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        namespace: otel
+
+      otlp/jaeger:
+        endpoint: jaeger-collector.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+      otlphttp/loki:
+        endpoint: http://loki.monitoring.svc.cluster.local:3100/otlp
+        tls:
+          insecure: true
 
     service:
-      enabled: true
+      extensions: [ health_check ]
 
-    ports:
-      otlp:
-        enabled: true
-        containerPort: 4317
-        servicePort: 4317
-      otlp-http:
-        enabled: true
-        containerPort: 4318
-        servicePort: 4318
-      metrics:
-        enabled: true
-        containerPort: 8888
-        servicePort: 8888
+      pipelines:
+        traces:
+          receivers: [ otlp ]
+          processors: [ memory_limiter, k8sattributes, batch ]
+          exporters: [ debug, otlp/jaeger ]
 
-    serviceMonitor:
-      enabled: true
-      additionalLabels: {}
-      metricsEndpoints:
-      - port: metrics
-        interval: 30s
-        path: /metrics
+        metrics:
+          receivers: [ otlp, prometheus ]
+          processors: [ memory_limiter, k8sattributes, batch ]
+          exporters: [ debug, prometheus ]
 
-    prometheusRule:
-      enabled: true
-      groups:
-      - name: opentelemetry-collector
-        interval: 30s
-        rules:
-        # Processor alerts
-        - alert: OTELProcessorDroppedSpans
-          expr: sum(rate(otelcol_processor_dropped_spans[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: spans dropped by processor"
-            description: |
-              Some spans have been dropped by processor in {{ $labels.namespace }}/{{ $labels.pod }}
-              Maybe collector has received non-standard spans or reached some limits
-              Current rate: {{ $value }} spans/sec
+        logs:
+          receivers: [ otlp ]
+          processors: [ memory_limiter, k8sattributes, batch ]
+          exporters: [ debug, otlphttp/loki ]
 
-        - alert: OTELProcessorDroppedMetrics
-          expr: sum(rate(otelcol_processor_dropped_metric_points[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: metric points dropped by processor"
-            description: |
-              Some metric points have been dropped by processor in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current rate: {{ $value }} points/sec
+      telemetry:
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888
+---
+# ServiceMonitor for OTEL Collector metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector-collector
+  namespaceSelector:
+    matchNames:
+    - monitoring
+  endpoints:
+  - port: monitoring
+    interval: 30s
+    path: /metrics
+---
+# PrometheusRule for OTEL Collector alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-collector-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: opentelemetry-collector
+    interval: 30s
+    rules:
+    - alert: OTELProcessorDroppedSpans
+      expr: sum(rate(otelcol_processor_dropped_spans[1m])) > 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "OTEL Collector: spans dropped by processor"
+        description: "Spans have been dropped in {{ $labels.namespace }}/{{ $labels.pod }}"
 
-        - alert: OTELProcessorDroppedLogs
-          expr: sum(rate(otelcol_processor_dropped_log_records[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: log records dropped by processor"
-            description: |
-              Some log records have been dropped by processor in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current rate: {{ $value }} logs/sec
+    - alert: OTELExporterSendFailedRequests
+      expr: sum(rate(otelcol_exporter_send_failed_requests[1m])) > 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "OTEL Collector: exporter send requests failed"
+        description: "Export requests failed in {{ $labels.namespace }}/{{ $labels.pod }}"
 
-        # Receiver alerts
-        - alert: OTELReceiverRefusedSpans
-          expr: sum(rate(otelcol_receiver_refused_spans[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: spans refused by receiver"
-            description: |
-              Some spans have been refused by receiver in {{ $labels.namespace }}/{{ $labels.pod }}
-              Transport: {{ $labels.transport }}, Receiver: {{ $labels.receiver }}
-              Current rate: {{ $value }} spans/sec
-
-        - alert: OTELReceiverRefusedMetrics
-          expr: sum(rate(otelcol_receiver_refused_metric_points[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: metric points refused by receiver"
-            description: |
-              Some metric points have been refused by receiver in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current rate: {{ $value }} points/sec
-
-        - alert: OTELReceiverRefusedLogs
-          expr: sum(rate(otelcol_receiver_refused_log_records[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: log records refused by receiver"
-            description: |
-              Some log records have been refused by receiver in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current rate: {{ $value }} logs/sec
-
-        # Exporter alerts
-        - alert: OTELExporterEnqueueFailedSpans
-          expr: sum(rate(otelcol_exporter_enqueue_failed_spans[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: spans failed to enqueue for export"
-            description: |
-              Some spans failed to enqueue in {{ $labels.namespace }}/{{ $labels.pod }}
-              Exporter: {{ $labels.exporter }}
-              Current rate: {{ $value }} spans/sec
-
-        - alert: OTELExporterEnqueueFailedMetrics
-          expr: sum(rate(otelcol_exporter_enqueue_failed_metric_points[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: metric points failed to enqueue for export"
-            description: |
-              Some metric points failed to enqueue in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current rate: {{ $value }} points/sec
-
-        - alert: OTELExporterEnqueueFailedLogs
-          expr: sum(rate(otelcol_exporter_enqueue_failed_log_records[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: log records failed to enqueue for export"
-            description: |
-              Some log records failed to enqueue in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current rate: {{ $value }} logs/sec
-
-        - alert: OTELExporterSendFailedRequests
-          expr: sum(rate(otelcol_exporter_send_failed_requests[1m])) > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector: exporter send requests failed"
-            description: |
-              Some exporter requests failed in {{ $labels.namespace }}/{{ $labels.pod }}
-              Exporter: {{ $labels.exporter }}
-              Current rate: {{ $value }} requests/sec
-
-        # Resource alerts
-        - alert: OTELHighCPUUsage
-          expr: max(rate(otelcol_process_cpu_seconds[1m])) * 100 > 90
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "OTEL Collector: high CPU usage"
-            description: |
-              High CPU usage detected in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current CPU: {{ $value | humanizePercentage }}
-
-        - alert: OTELHighMemoryUsage
-          expr: |
-            (otelcol_process_memory_rss / on(pod, namespace) 
-            kube_pod_container_resource_limits{resource="memory", container=~".*otel.*"}) > 0.9
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "OTEL Collector: high memory usage"
-            description: |
-              High memory usage detected in {{ $labels.namespace }}/{{ $labels.pod }}
-              Current usage: {{ $value | humanizePercentage }} of limit
-
-        - alert: OTELQueueAlmostFull
-          expr: |
-            (otelcol_exporter_queue_size / otelcol_exporter_queue_capacity) > 0.8
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "OTEL Collector: export queue almost full"
-            description: |
-              Export queue is {{ $value | humanizePercentage }} full in {{ $labels.namespace }}/{{ $labels.pod }}
-              Exporter: {{ $labels.exporter }}
-
-        - alert: OTELCollectorDown
-          expr: up{job="otel-collector"} == 0
-          for: 3m
-          labels:
-            severity: critical
-          annotations:
-            summary: "OTEL Collector is down"
-            description: |
-              OTEL Collector instance {{ $labels.namespace }}/{{ $labels.pod }} is down
-
-    config:
-      extensions:
-        health_check:
-          endpoint: 0.0.0.0:13133
-
-      receivers:
-        otlp:
-          protocols:
-            grpc:
-              endpoint: 0.0.0.0:4317
-            http:
-              endpoint: 0.0.0.0:4318
-
-      processors:
-        memory_limiter:
-          check_interval: 5s
-          limit_percentage: 80
-          # limit_mib: 256
-          spike_limit_percentage: 25
-        batch: {}
-
-      exporters:
-        debug:
-          verbosity: detailed
-
-        prometheus:
-          endpoint: 0.0.0.0:8889
-
-        otlp/jaeger:
-          endpoint: jaeger-collector.monitoring.svc.cluster.local:4317
-          tls:
-            insecure: true
-
-        otlphttp/loki:
-          endpoint: http://loki.monitoring.svc.cluster.local:3100/otlp
-          tls:
-            insecure: true
-
-      service:
-        extensions: [ health_check ]
-        pipelines:
-          traces:
-            receivers: [ otlp ]
-            processors: [ memory_limiter, batch ]
-            exporters: [ debug, otlp/jaeger ]
-          metrics:
-            receivers: [ otlp ]
-            processors: [ memory_limiter, batch ]
-            exporters: [ debug, prometheus ]
-          logs:
-            receivers: [ otlp ]
-            processors: [ memory_limiter, batch ]
-            exporters: [ debug, otlphttp/loki ]
-
-        telemetry:
-          resource:
-            service.name: otel-collector
-          metrics:
-            level: detailed
-            readers:
-            - pull:
-                exporter:
-                  prometheus:
-                    host: 0.0.0.0
-                    port: 8888
-                    with_resource_constant_labels:
-                      included:
-                      - service.name
-
-    resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
+    - alert: OTELCollectorDown
+      expr: up{job=~".*otel.*"} == 0
+      for: 3m
+      labels:
+        severity: critical
+      annotations:
+        summary: "OTEL Collector is down"
+        description: "OTEL Collector instance is down"

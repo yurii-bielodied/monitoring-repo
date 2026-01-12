@@ -4,6 +4,9 @@ metadata:
   name: demo
   namespace: flux-system
 spec:
+  dependsOn:
+  - name: monitoring
+
   interval: 5m
   path: ./flux-repo/cluster/demo
   prune: true

@@ -170,27 +170,27 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 8080:80
 
 ## 📸 Демо: Grafana Loki Dashboard
 
-![Grafana Loki Dashboard](img/loki.png)
-
 На скріншоті показано:
 
 - Фільтрація логів за namespace `demo` та контейнером `kbot`
 - Histogram логів з часовою шкалою
 - Детальний перегляд логів у JSON форматі
 
-## Grafana Dashboards
+![Grafana Loki Dashboard](img/loki.png)
 
-![Grafana Dashboards](img/dashboards.png)
+## Grafana Dashboards
 
 Також доступні інші дашборди
 
-![Grafana Load Dashboard](img/load.png)
+![Grafana Dashboards](img/dashboards.png)
 
 На скріншоті показано:
 
 - Графіки CPU та Memory Usage
 - CPU Requests & Limits
 - Cluster Utilization
+
+![Grafana Load Dashboard](img/load.png)
 
 ---
 

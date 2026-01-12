@@ -21,7 +21,7 @@ resource "github_repository_deploy_key" "flux" {
 
 provider "flux" {
   kubernetes = {
-    config_path = var.config_path
+    config_path = "${path.root}/kind-cluster-config"
   }
   git = {
     url    = "ssh://git@github.com/${var.GITHUB_OWNER}/${var.FLUX_GITHUB_REPO}.git"
@@ -36,7 +36,10 @@ provider "flux" {
 module "flux_bootstrap" {
   source = "./modules/fluxcd-flux-bootstrap"
 
-  depends_on = [module.kind_cluster]
+  depends_on = [
+    module.kind_cluster,
+    github_repository_deploy_key.flux
+  ]
 
   github_repository = "${var.GITHUB_OWNER}/${var.FLUX_GITHUB_REPO}"
   private_key       = module.tls_private_key.private_key_pem
@@ -45,6 +48,7 @@ module "flux_bootstrap" {
 
 provider "kubernetes" {
   config_path = "${path.root}/kind-cluster-config"
+  # config_path = pathexpand("~/.kube/config") # WSL
 }
 
 resource "kubernetes_secret_v1" "kbot" {

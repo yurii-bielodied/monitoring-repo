@@ -176,6 +176,10 @@ spec:
   - port: prom-export
     interval: 30s
     path: /metrics
+    relabelConfigs:
+    - sourceLabels: [ job ]
+      targetLabel: job
+      replacement: otel-collector
 ---
 # PrometheusRule for OTEL Collector alerts
 apiVersion: monitoring.coreos.com/v1

@@ -148,8 +148,14 @@ spec:
 
       telemetry:
         metrics:
-          address: 0.0.0.0:8888
           level: detailed
+          readers:
+          - periodic:
+              interval: 10s
+              exporter:
+                prometheus:
+                  host: 0.0.0.0
+                  port: 8888
 ---
 # ServiceMonitor for OTEL Collector metrics
 apiVersion: monitoring.coreos.com/v1

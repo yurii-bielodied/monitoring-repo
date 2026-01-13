@@ -174,6 +174,7 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 8080:80
 
 - Фільтрація логів за namespace `demo` та контейнером `kbot`
 - Histogram логів з часовою шкалою
+- Графіки CPU та Memory Usage
 - Детальний перегляд логів у JSON форматі
 
 ![Grafana Loki Dashboard](img/loki.png)

@@ -195,6 +195,20 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 8080:80
 
 ---
 
+## 📊 Доступ до Jaeger
+
+```bash
+kubectl port-forward svc/jaeger-query 16686:16686 -n monitoring
+```
+
+**URL:** http://localhost:16686
+
+## Jaeger UI
+
+![Jaeger](img/jaeger.png)
+
+---
+
 ## 📈 Інструментація kbot
 
 ### Prometheus Metrics
@@ -213,10 +227,12 @@ kbot експортує наступні метрики на `/metrics`:
 kbot створює spans для кожної операції:
 
 ```
+
 handle_message (root span)
 ├── command_hello
 ├── command_time
 └── command_default
+
 ```
 
 ### Приклад коду інструментації

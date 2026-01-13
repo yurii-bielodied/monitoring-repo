@@ -162,7 +162,7 @@ spec:
     matchNames:
     - monitoring
   endpoints:
-  - port: monitoring
+  - port: prom-export
     interval: 30s
     path: /metrics
 ---

@@ -11,7 +11,11 @@ terraform {
     }
     kind = {
       source  = "tehcyx/kind"
-      version = "0.10"
+      version = "0.9" # 0.10.0 has a bug with Terraform destroy
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13.0"
     }
   }
 }

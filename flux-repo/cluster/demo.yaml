@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   dependsOn:
-  - name: monitoring
+  - name: otel-collector
 
   interval: 5m
   path: ./flux-repo/cluster/demo

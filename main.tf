@@ -21,7 +21,10 @@ resource "github_repository_deploy_key" "flux" {
 
 provider "flux" {
   kubernetes = {
-    config_path = "${path.root}/kind-cluster-config"
+    host                   = module.kind_cluster.endpoint
+    client_certificate     = module.kind_cluster.crt
+    client_key             = module.kind_cluster.client_key
+    cluster_ca_certificate = module.kind_cluster.ca
   }
   git = {
     url    = "ssh://git@github.com/${var.GITHUB_OWNER}/${var.FLUX_GITHUB_REPO}.git"
@@ -47,11 +50,19 @@ module "flux_bootstrap" {
 }
 
 provider "kubernetes" {
-  config_path = "${path.root}/kind-cluster-config"
+  host                   = module.kind_cluster.endpoint
+  client_certificate     = module.kind_cluster.crt
+  client_key             = module.kind_cluster.client_key
+  cluster_ca_certificate = module.kind_cluster.ca
+}
+
+resource "time_sleep" "wait_for_flux" {
+  depends_on      = [module.flux_bootstrap]
+  create_duration = "30s"
 }
 
 resource "kubernetes_secret_v1" "kbot" {
-  depends_on = [module.flux_bootstrap]
+  depends_on = [time_sleep.wait_for_flux]
 
   metadata {
     name      = "kbot"

@@ -50,6 +50,11 @@ spec:
       prometheus:
         config:
           scrape_configs:
+          - job_name: 'otel-collector-self'
+            scrape_interval: 10s
+            static_configs:
+            - targets: [ '0.0.0.0:8888' ]
+
           - job_name: 'kbot-metrics'
             scrape_interval: 15s
             kubernetes_sd_configs:
@@ -143,6 +148,7 @@ spec:
 
       telemetry:
         metrics:
+          address: 0.0.0.0:8888
           level: detailed
 ---
 # ServiceMonitor for OTEL Collector metrics
